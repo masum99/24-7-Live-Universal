@@ -1,12 +1,12 @@
-name: 24-7-Live-Universal-Aspect
+name: 24-7-Live-Universal-Fixed
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 */5 * * *'
 
 concurrency:
-  group: youtube-live
-  cancel-in-progress: true
+  group: youtube-live-universal
+  cancel-in-progress: false
 
 jobs:
   live:
@@ -25,42 +25,33 @@ jobs:
         run: |
           if echo "$VIDEO_URL" | grep -q "drive.google"; then
             FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2); [ -z "$FILEID" ] && FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3)
-            gdown "https://drive.google.com/uc?id=$FILEID" -O video.mp4
+            gdown --fuzzy "https://drive.google.com/uc?id=$FILEID" -O video.mp4
           else
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
-          ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of default=nw=1 video.mp4 || true
           ls -lh video.mp4
+          ffprobe -v error -select_streams v:0 -show_entries stream=width,height,codec_name -of default=nw=1 video.mp4
+          HAS_A=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 video.mp4 | wc -l); echo "Audio streams: $HAS_A"
 
-      - name: Start Stream Auto 16-9 and 9-16
+      - name: Start Stream Auto 16-9 and 9-16 Fixed
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g")
-          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
+          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g; s/:/ /g")
+          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g; s/:/ /g")
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          # Detect aspect
           PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4)
-          W=$(echo $PROBE | cut -d',' -f1)
-          H=$(echo $PROBE | cut -d',' -f2)
-          echo "Input video: ${W}x${H}"
-          if [ "$H" -gt "$W" ]; then
-            echo "Vertical 9:16 detected -> Output 720x1280"
-            OUT_W=720; OUT_H=1280
-            SCROLL_Y=1200
-            LIVE_X=30; LIVE_Y=30
-            POPUP_Y=40
-          else
-            echo "Horizontal 16:9 detected -> Output 1280x720"
-            OUT_W=1280; OUT_H=720
-            SCROLL_Y=640
-            LIVE_X=30; LIVE_Y=24
-            POPUP_Y=28
-          fi
-          cat > /tmp/f.txt <<EOF
-          scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=${LIVE_X}:y=${LIVE_Y}:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=$((LIVE_X+10)):y=$((LIVE_Y+4)):fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=${POPUP_Y}:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\\,w+tw):y=${SCROLL_Y}:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
-          EOF
+          W=$(echo $PROBE | cut -d',' -f1); H=$(echo $PROBE | cut -d',' -f2)
+          if [ -z "$W" ]; then W=1280; H=720; fi
+          echo "Input: ${W}x${H}"
+          if [ "$H" -gt "$W" ]; then OUT_W=720; OUT_H=1280; SCROLL_Y=1180; POPUP_Y=80; LIVE_Y=40; echo "Vertical Mode"; else OUT_W=1280; OUT_H=720; SCROLL_Y=640; POPUP_Y=28; LIVE_Y=24; echo "Horizontal Mode"; fi
+          HAS_AUDIO=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 video.mp4 | wc -l)
+          if [ "$HAS_AUDIO" -eq 0 ]; then echo "No audio -> silent audio"; A_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"; A_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"; else A_IN=""; A_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"; fi
+          cat > /tmp/f.txt <<'ENDOFFILTER'
+          scale=OUTW:OUTH:force_original_aspect_ratio=decrease,pad=OUTW:OUTH:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=LIVEY:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=FONTFILE:text='LIVE':x=30:y=LIVEY2:fontcolor=white:fontsize=18,drawtext=fontfile=FONTFILE:text='POPUPTXT':x=(w-tw)/2:y=POPUPY:fontcolor=white:fontsize=32:box=1:boxcolor=black@0.75:boxborderw=12,drawtext=fontfile=FONTFILE:text='SCROLLTXT':x=w-mod(90*t\,w+tw):y=SCROLLY:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
+          ENDOFFILTER
+          sed -i "s|OUTW|$OUT_W|g; s|OUTH|$OUT_H|g; s|FONTFILE|$FONT|g; s|LIVEY|$LIVE_Y|g; s|LIVEY2|$((LIVE_Y+4))|g; s|POPUPY|$POPUP_Y|g; s|SCROLLY|$SCROLL_Y|g; s|POPUPTXT|$POPUP|g; s|SCROLLTXT|$SCROLL|g" /tmp/f.txt
           cat /tmp/f.txt
-          ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 3000k -bufsize 6000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
+          ffmpeg -re -stream_loop -1 -i video.mp4 $A_IN -vf "$(cat /tmp/f.txt)" $A_MAP -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
