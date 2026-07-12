@@ -1,0 +1,66 @@
+name: 24-7-Live-Universal-Aspect
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+concurrency:
+  group: youtube-live
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3-pip fonts-noto-core
+          pip3 install --upgrade gdown yt-dlp
+
+      - name: Download Video
+        env:
+          VIDEO_URL: ${{ secrets.VIDEO_URL }}
+        run: |
+          if echo "$VIDEO_URL" | grep -q "drive.google"; then
+            FILEID=$(echo "$VIDEO_URL" | grep -oE 'id=[^&]+' | cut -d= -f2); [ -z "$FILEID" ] && FILEID=$(echo "$VIDEO_URL" | grep -oE '/d/[^/]+' | cut -d'/' -f3)
+            gdown "https://drive.google.com/uc?id=$FILEID" -O video.mp4
+          else
+            yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
+          fi
+          ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of default=nw=1 video.mp4 || true
+          ls -lh video.mp4
+
+      - name: Start Stream Auto 16-9 and 9-16
+        env:
+          YT_KEY: ${{ secrets.YT_KEY }}
+          SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
+          POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
+        run: |
+          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g")
+          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g")
+          FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          # Detect aspect
+          PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4)
+          W=$(echo $PROBE | cut -d',' -f1)
+          H=$(echo $PROBE | cut -d',' -f2)
+          echo "Input video: ${W}x${H}"
+          if [ "$H" -gt "$W" ]; then
+            echo "Vertical 9:16 detected -> Output 720x1280"
+            OUT_W=720; OUT_H=1280
+            SCROLL_Y=1200
+            LIVE_X=30; LIVE_Y=30
+            POPUP_Y=40
+          else
+            echo "Horizontal 16:9 detected -> Output 1280x720"
+            OUT_W=1280; OUT_H=720
+            SCROLL_Y=640
+            LIVE_X=30; LIVE_Y=24
+            POPUP_Y=28
+          fi
+          cat > /tmp/f.txt <<EOF
+          scale=${OUT_W}:${OUT_H}:force_original_aspect_ratio=decrease,pad=${OUT_W}:${OUT_H}:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=${LIVE_X}:y=${LIVE_Y}:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=$FONT:text='LIVE':x=$((LIVE_X+10)):y=$((LIVE_Y+4)):fontcolor=white:fontsize=18,drawtext=fontfile=$FONT:text='$POPUP':x=(w-tw)/2:y=${POPUP_Y}:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=$FONT:text='$SCROLL':x=w-mod(90*t\\,w+tw):y=${SCROLL_Y}:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
+          EOF
+          cat /tmp/f.txt
+          ffmpeg -re -stream_loop -1 -i video.mp4 -vf "$(cat /tmp/f.txt)" -c:v libx264 -preset veryfast -maxrate 3000k -bufsize 6000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -f flv rtmp://a.rtmp.youtube.com/live2/$YT_KEY
