@@ -1,4 +1,4 @@
-name: 24-7-Live-Final-Animated
+name: 24-7-Live-Final-Animated-Fixed-Pos
 on:
   workflow_dispatch:
   schedule:
@@ -30,9 +30,8 @@ jobs:
             yt-dlp -o video.mp4 "$VIDEO_URL" || curl -L -o video.mp4 "$VIDEO_URL"
           fi
           ls -lh video.mp4
-          ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4
 
-      - name: Start Stream Animated Final
+      - name: Start Stream
         env:
           YT_KEY: ${{ secrets.YT_KEY }}
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
@@ -44,13 +43,16 @@ jobs:
           PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4)
           W=$(echo $PROBE | cut -d',' -f1); H=$(echo $PROBE | cut -d',' -f2)
           if [ -z "$W" ]; then W=1280; H=720; fi
-          echo "Input: ${W}x${H}"
-          if [ "$H" -gt "$W" ]; then OUT_W=720; OUT_H=1280; SCROLL_Y=1200; POPUP_Y=85; LIVE_Y=35; echo "Vertical 9:16"; else OUT_W=1280; OUT_H=720; SCROLL_Y=640; POPUP_Y=28; LIVE_Y=20; echo "Horizontal 16:9"; fi
-          LIVE_Y2=$((LIVE_Y+4))
+          if [ "$H" -gt "$W" ]; then
+            OUT_W=720; OUT_H=1280; SCROLL_Y=1220; POPUP_Y=120; LIVE_Y=70; echo "Vertical Mode"
+          else
+            OUT_W=1280; OUT_H=720; SCROLL_Y=640; POPUP_Y=28; LIVE_Y=20; echo "Horizontal Mode"
+          fi
+          LIVE_Y2=$((LIVE_Y+6))
           HAS_AUDIO=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 video.mp4 | wc -l)
-          if [ "$HAS_AUDIO" -eq 0 ]; then echo "No audio -> silent"; A_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"; A_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"; else A_IN=""; A_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"; fi
+          if [ "$HAS_AUDIO" -eq 0 ]; then A_IN="-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100"; A_MAP="-map 0:v:0 -map 1:a:0 -c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest"; else A_IN=""; A_MAP="-c:v libx264 -preset veryfast -maxrate 2500k -bufsize 5000k -g 60 -pix_fmt yuv420p -c:a aac -b:a 128k"; fi
           cat > /tmp/f.txt <<'ENDOFFILTER'
-          scale=OUTW:OUTH:force_original_aspect_ratio=decrease,pad=OUTW:OUTH:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=20:y=LIVEY:w=78:h=32:color=red@0.9:t=fill,drawtext=fontfile=FONTFILE:text='LIVE':x=30:y=LIVEY2:fontcolor=white:fontsize=18,drawtext=fontfile=FONTFILE:text='POPUPTXT':x=(w-tw)/2:y=POPUPY:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.75:boxborderw=12:alpha=0.75+0.25*sin(2*PI*t*1.5):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=FONTFILE:text='SCROLLTXT':x=w-mod(90*t\,w+tw):y=SCROLLY:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.55:boxborderw=8
+          scale=OUTW:OUTH:force_original_aspect_ratio=decrease,pad=OUTW:OUTH:(ow-iw)/2:(oh-ih)/2:color=black,drawbox=x=18:y=LIVEY:w=86:h=34:color=red@1:t=fill:enable='gt(t,0)',drawtext=fontfile=FONTFILE:text='LIVE':x=28:y=LIVEY2:fontcolor=white:fontsize=20:box=0,drawtext=fontfile=FONTFILE:text='POPUPTXT':x=(w-tw)/2:y=POPUPY:fontcolor=white:fontsize=32+6*sin(2*PI*t/1.2):box=1:boxcolor=black@0.78:boxborderw=14:alpha=0.85+0.15*sin(2*PI*t*1.4):shadowcolor=black:shadowx=2:shadowy=2,drawtext=fontfile=FONTFILE:text='SCROLLTXT':x=w-mod(90*t\,w+tw):y=SCROLLY:fontcolor=yellow:fontsize=26:box=1:boxcolor=black@0.6:boxborderw=8
           ENDOFFILTER
           sed -i "s|OUTW|$OUT_W|g; s|OUTH|$OUT_H|g; s|FONTFILE|$FONT|g; s|LIVEY|$LIVE_Y|g; s|LIVEY2|$LIVE_Y2|g; s|POPUPY|$POPUP_Y|g; s|SCROLLY|$SCROLL_Y|g; s|POPUPTXT|$POPUP|g; s|SCROLLTXT|$SCROLL|g" /tmp/f.txt
           cat /tmp/f.txt
