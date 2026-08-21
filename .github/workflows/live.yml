@@ -1,11 +1,13 @@
 name: 24-7-Live-Final-Fixed-Pos-V2
+
 on:
-  workflow_dispatch:
-  schedule:
-# প্রতি ৫ ঘন্টা পর পর
-    - cron: '0 */5 * * *'
-# বাংলাদেশ রাত ৮ টায় চলবে
-    - cron: '0 14 * * *'
+#  workflow_dispatch:
+#  schedule:
+    # প্রতি ৫ ঘন্টা পর পর
+#    - cron: '0 */5 * * *'
+    # বাংলাদেশ রাত ৮ টায় চলবে
+#    - cron: '0 14 * * *'
+
 concurrency:
   group: youtube-live-final
   cancel-in-progress: false
@@ -19,7 +21,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg python3-pip fonts-noto-core
-          pip3 install --upgrade gdown yt-dlp
+          pip3 install --break-system-packages --upgrade gdown yt-dlp || pip3 install --upgrade gdown yt-dlp
 
       - name: Download Video
         env:
@@ -39,8 +41,10 @@ jobs:
           SCROLL_TEXT: ${{ secrets.SCROLL_TEXT }}
           POPUP_TEXT: ${{ secrets.POPUP_TEXT }}
         run: |
-          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g; s/:/ /g; s/|//g")
-          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g; s/:/ /g; s/|//g")
+          SCROLL=$(echo "${SCROLL_TEXT:-SUBSCRIBE NOW - 24/7 LIVE}" | sed "s/'//g; s/:/ /g; s/|//g; s/,/ /g; s/\\\\//g")
+          POPUP=$(echo "${POPUP_TEXT:-SUBSCRIBE NOW}" | sed "s/'//g; s/:/ /g; s/|//g; s/,/ /g; s/\\\\//g")
+          SCROLL=${SCROLL//&/\\&}
+          POPUP=${POPUP//&/\\&}
           FONT="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
           PROBE=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 video.mp4)
           W=$(echo $PROBE | cut -d',' -f1); H=$(echo $PROBE | cut -d',' -f2)
